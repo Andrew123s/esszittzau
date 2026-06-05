@@ -1,0 +1,76 @@
+// =====================================================================
+// ESS — Firestore security rules
+// Paste these into your Firebase project:
+//   Firebase Console → Build → Firestore Database → Rules tab → Publish.
+//
+// These rules allow anonymous read/write on the /arenas collection only,
+// which is what the live ESS quiz needs (no login flow).
+//
+// Validation enforced server-side:
+//   - Arena documents may only contain `rosters`, `scores`, `createdAt`,
+//     `updatedAt`.
+//   - Every stan key is one of lin / sham / kim / ring.
+//   - Rosters are arrays of strings, max 3 entries each.
+//   - Scores are non-negative integers.
+//   - Play log entries must have name/stan/score/ts.
+//
+// For tighter control during a real classroom session you can swap the
+// `if true` clauses for `if request.auth != null` after enabling
+// Anonymous Auth, then sign players in anonymously in app.js.
+// =====================================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /arenas/{arenaId} {
+      allow read: if true;
+
+      allow create, update: if isValidArena(request.resource.data);
+      allow delete: if false;
+
+      match /plays/{playId} {
+        allow read: if true;
+        allow create: if isValidPlay(request.resource.data);
+        allow update: if false;
+        allow delete: if true;   // needed for the "Reset arena" action
+      }
+    }
+  }
+}
+
+function isValidArena(d) {
+  return d.keys().hasOnly(['rosters', 'scores', 'createdAt', 'updatedAt'])
+      && d.rosters is map
+      && d.scores  is map
+      && validRosters(d.rosters)
+      && validScores(d.scores);
+}
+
+function validRosters(r) {
+  return r.keys().hasOnly(['lin', 'sham', 'kim', 'ring'])
+      && validRoster(r.lin)  && validRoster(r.sham)
+      && validRoster(r.kim)  && validRoster(r.ring);
+}
+
+function validRoster(arr) {
+  return arr is list && arr.size() <= 3;
+}
+
+function validScores(s) {
+  return s.keys().hasOnly(['lin', 'sham', 'kim', 'ring'])
+      && validScore(s.lin)  && validScore(s.sham)
+      && validScore(s.kim)  && validScore(s.ring);
+}
+
+function validScore(n) {
+  return n is int && n >= 0 && n <= 10000;
+}
+
+function isValidPlay(p) {
+  return p.keys().hasOnly(['name', 'stan', 'score', 'ts'])
+      && p.name  is string && p.name.size() > 0 && p.name.size() <= 64
+      && p.stan  in ['lin', 'sham', 'kim', 'ring']
+      && p.score is int    && p.score >= 0 && p.score <= 10;
+}

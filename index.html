@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ESS — Ecosystem System Services · Restoration Fighting Ground</title>
+<link rel="stylesheet" href="styles.css" />
+<!-- canvas-confetti for confetti bursts -->
+<script defer src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+</head>
+<body>
+
+<!-- ===================== TOP BAR ===================== -->
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">ESS</span>
+    <span class="brand-sub">Ecosystem System Services</span>
+  </div>
+  <div class="topbar-right">
+    <span id="player-chip" class="chip hidden"></span>
+    <span id="stan-chip" class="chip hidden"></span>
+    <button id="reset-btn" class="ghost-btn" title="Reset all Stan rosters & scores">Reset arena</button>
+  </div>
+</header>
+
+<!-- balloons + confetti containers -->
+<div id="balloon-layer" class="balloon-layer" aria-hidden="true"></div>
+
+<main id="stage" class="stage">
+  <!-- screens are swapped in by app.js -->
+</main>
+
+<footer class="footer">
+  EU Nature Restoration Law · Regulation (EU) 2024/1991 — Academic Group Presentation
+</footer>
+
+
+<!-- ===================== TEMPLATES ===================== -->
+
+<!-- Screen: name entry -->
+<template id="tpl-name">
+  <section class="screen screen-center">
+    <div class="hero-card">
+      <div class="hero-eyebrow">Welcome, contender</div>
+      <h1 class="hero-title">Enter the Arena</h1>
+      <p class="hero-lede">Type your name to begin. You'll be asked to choose your Stan next.</p>
+      <form id="name-form" class="name-form" autocomplete="off">
+        <input id="name-input" type="text" maxlength="32"
+               placeholder="Your name…" required />
+        <button class="primary-btn" type="submit">
+          Continue
+          <span class="arrow">→</span>
+        </button>
+      </form>
+      <p class="micro">10 questions · 10 seconds each · 4 Stans · 3 fighters per Stan</p>
+    </div>
+  </section>
+</template>
+
+<!-- Screen: choose your stan -->
+<template id="tpl-choose-stan">
+  <section class="screen">
+    <div class="choose-head">
+      <div class="eyebrow">Choose your destiny</div>
+      <h2 class="screen-title">Pick your Stan</h2>
+      <p class="screen-sub">Each Stan holds a maximum of three fighters. Choose wisely.</p>
+    </div>
+    <div id="stan-grid" class="stan-grid"></div>
+  </section>
+</template>
+
+<!-- Screen: welcome celebration -->
+<template id="tpl-welcome">
+  <section class="screen screen-center">
+    <div class="welcome-card">
+      <div class="welcome-glow"></div>
+      <h2 class="welcome-title">Welcome to</h2>
+      <h1 class="welcome-headline">Restoration Fighting Ground</h1>
+      <p class="welcome-sub">Get ready. Ten questions. Ten seconds each. No mercy.</p>
+      <button id="start-quiz-btn" class="primary-btn big">
+        Enter the ring
+        <span class="arrow">→</span>
+      </button>
+    </div>
+  </section>
+</template>
+
+<!-- Screen: quiz -->
+<template id="tpl-quiz">
+  <section class="screen">
+    <div class="quiz-bar">
+      <div class="quiz-meta">
+        <span id="q-counter" class="q-counter">Q 1 / 10</span>
+        <span id="q-score" class="q-score">0 correct</span>
+      </div>
+      <div class="timer-wrap">
+        <div id="timer-bar" class="timer-bar"></div>
+        <div id="timer-text" class="timer-text">10</div>
+      </div>
+    </div>
+    <div id="question-card" class="question-card">
+      <h2 id="question-text" class="question-text"></h2>
+      <div id="options" class="options"></div>
+    </div>
+  </section>
+</template>
+
+<!-- Screen: end-of-quiz -->
+<template id="tpl-quiz-end">
+  <section class="screen screen-center">
+    <div class="hero-card">
+      <div class="hero-eyebrow">Round complete</div>
+      <h2 class="hero-title">Nice fight, <span id="end-name"></span>.</h2>
+      <p class="hero-lede">You scored <strong id="end-score"></strong> out of 10 for <strong id="end-stan"></strong>.</p>
+      <div class="end-actions">
+        <button id="show-results-btn" class="primary-btn big">
+          Show Results
+          <span class="arrow">→</span>
+        </button>
+        <button id="another-fighter-btn" class="ghost-btn">Pass to another fighter</button>
+      </div>
+    </div>
+  </section>
+</template>
+
+<!-- Screen: results -->
+<template id="tpl-results">
+  <section class="screen">
+    <div class="choose-head">
+      <div class="eyebrow">Scoreboard</div>
+      <h2 class="screen-title">Stan Rankings</h2>
+      <p class="screen-sub">Total correct answers contributed by all fighters in each Stan.</p>
+    </div>
+    <div id="results-board" class="results-board"></div>
+    <div class="results-actions">
+      <button id="play-again-btn" class="ghost-btn">Add another fighter</button>
+      <button id="hard-reset-btn" class="danger-btn">Reset arena</button>
+    </div>
+  </section>
+</template>
+
+<!-- Audio (sound files in working directory) -->
+<audio id="sfx-choose"   src="Choose_Your_Destiny.mp3" preload="auto"></audio>
+<audio id="sfx-welcome"  src="welcome.mp3"             preload="auto"></audio>
+<audio id="sfx-fatality" src="fatality.mp3"            preload="auto"></audio>
+<audio id="sfx-loser"    src="Loser.mp3"               preload="auto"></audio>
+<audio id="sfx-fight"    src="Round_One_Fight.mp3"     preload="auto"></audio>
+
+<!-- Firebase config first (sets window.ESS_FIREBASE_CONFIG before the app module loads) -->
+<script src="firebase-config.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
