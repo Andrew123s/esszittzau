@@ -72,13 +72,25 @@ class LocalStore {
     return { ok: true };
   }
 
-  async submitScore(stanId, playerName, score) {
+  async submitScore(stanId, playerName, score, answers = []) {
     this.state.scores[stanId] = (this.state.scores[stanId] || 0) + score;
     this.state.plays.push({
-      name: playerName, stan: stanId, score, ts: Date.now(),
+      name: playerName,
+      stan: stanId,
+      score,
+      answers: Array.isArray(answers) ? answers.slice(0, 10) : [],
+      ts: Date.now(),
     });
     this.#write(); this.#notify();
     return { ok: true };
+  }
+
+  async listPlays() {
+    return this.state.plays.map(p => ({
+      name: p.name, stan: p.stan, score: p.score,
+      answers: Array.isArray(p.answers) ? p.answers.slice() : [],
+      ts: p.ts || 0,
+    }));
   }
 
   async reset() {
@@ -176,8 +188,9 @@ class FirestoreStore {
     }
   }
 
-  async submitScore(stanId, playerName, score) {
+  async submitScore(stanId, playerName, score, answers = []) {
     const fs = this._fb;
+    const safeAnswers = Array.isArray(answers) ? answers.slice(0, 10) : [];
     try {
       await fs.runTransaction(this.db, async tx => {
         const snap = await tx.get(this.arenaRef);
@@ -190,12 +203,35 @@ class FirestoreStore {
         }, { merge: true });
       });
       await fs.addDoc(fs.collection(this.db, 'arenas', this.arenaId, 'plays'), {
-        name: playerName, stan: stanId, score, ts: fs.serverTimestamp(),
+        name: playerName, stan: stanId, score,
+        answers: safeAnswers,
+        ts: fs.serverTimestamp(),
       });
       return { ok: true };
     } catch (e) {
       console.error('submitScore failed', e);
       return { ok: false, reason: 'error' };
+    }
+  }
+
+  async listPlays() {
+    const fs = this._fb;
+    try {
+      const snap = await fs.getDocs(fs.collection(this.db, 'arenas', this.arenaId, 'plays'));
+      return snap.docs.map(d => {
+        const data = d.data() || {};
+        return {
+          name:    data.name || '',
+          stan:    data.stan || '',
+          score:   typeof data.score === 'number' ? data.score : 0,
+          answers: Array.isArray(data.answers) ? data.answers : [],
+          ts:      data.ts && typeof data.ts.toMillis === 'function'
+                     ? data.ts.toMillis() : 0,
+        };
+      });
+    } catch (e) {
+      console.error('listPlays failed', e);
+      return [];
     }
   }
 

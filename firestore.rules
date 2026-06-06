@@ -69,8 +69,9 @@ function validScore(n) {
 }
 
 function isValidPlay(p) {
-  return p.keys().hasOnly(['name', 'stan', 'score', 'ts'])
-      && p.name  is string && p.name.size() > 0 && p.name.size() <= 64
-      && p.stan  in ['lin', 'sham', 'kim', 'ring']
-      && p.score is int    && p.score >= 0 && p.score <= 10;
+  return p.keys().hasOnly(['name', 'stan', 'score', 'answers', 'ts'])
+      && p.name    is string && p.name.size() > 0 && p.name.size() <= 64
+      && p.stan    in ['lin', 'sham', 'kim', 'ring']
+      && p.score   is int    && p.score >= 0 && p.score <= 10
+      && p.answers is list   && p.answers.size() <= 10;
 }

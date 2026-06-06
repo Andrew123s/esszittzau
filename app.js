@@ -400,8 +400,11 @@ function screenQuiz(index) {
 }
 
 async function screenQuizEnd() {
-  // Commit this player's score to their Stan total (atomic on cloud, sync on local).
-  await store.submitScore(session.stanId, session.name, session.score);
+  // Commit this player's score AND per-question answers to their Stan total
+  // (atomic on cloud, sync on local). The answers array powers the analytics view.
+  await store.submitScore(
+    session.stanId, session.name, session.score, session.answers
+  );
 
   mount('tpl-quiz-end', () => {
     const stan = STANS.find(s => s.id === session.stanId);
@@ -409,10 +412,14 @@ async function screenQuizEnd() {
     document.getElementById('end-score').textContent = session.score;
     document.getElementById('end-stan').textContent  = `Team ${stan.name}`;
 
+    // Gate: presenter must enter the shared passcode before the
+    // scoreboard appears. This ensures every fighter has finished.
     document.getElementById('show-results-btn').addEventListener('click', () => {
-      confettiLong(3);
-      releaseBalloons(40);
-      setTimeout(() => screenResults(), 400);
+      passcodeModal(() => {
+        confettiLong(3);
+        releaseBalloons(40);
+        setTimeout(() => screenResults(), 400);
+      });
     });
     document.getElementById('another-fighter-btn').addEventListener('click', () => {
       session.name = null; session.stanId = null;
@@ -421,6 +428,70 @@ async function screenQuizEnd() {
       screenName();
     });
   });
+}
+
+// ---------------- Passcode gate ----------------
+// The passcode itself is NEVER written to the source. We store only the
+// SHA-256 hex of the chosen string; the verification call hashes user
+// input and compares. Inspecting the bundle reveals the hash, not the
+// passcode. This is sufficient to hide it from casual devtools peeking.
+const PASS_HASH = '3640653d572cf1be611fc02d83e318cd429fe106b37ca1873eeaea4ddfdff9e9';
+
+async function sha256Hex(text) {
+  const enc = new TextEncoder().encode(String(text));
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function passcodeModal(onSuccess) {
+  const root = document.createElement('div');
+  root.className = 'modal-backdrop';
+  root.innerHTML = `
+    <div class="modal modal-pop passcode-modal">
+      <div class="passcode-icon" aria-hidden="true">🔒</div>
+      <h3>Reveal Results</h3>
+      <p>Enter the presenter's key to unlock the scoreboard.<br>
+         This makes sure every fighter has finished.</p>
+      <form class="passcode-form" autocomplete="off">
+        <input type="password" class="passcode-input"
+               placeholder="Presenter key"
+               maxlength="64" autocomplete="off" spellcheck="false"
+               aria-label="Presenter key" />
+        <div class="passcode-error hidden">Wrong key. Try again.</div>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn passcode-cancel">Cancel</button>
+          <button type="submit" class="primary-btn">
+            Unlock <span class="arrow">→</span>
+          </button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(root);
+
+  const input = root.querySelector('.passcode-input');
+  const form  = root.querySelector('.passcode-form');
+  const err   = root.querySelector('.passcode-error');
+  const box   = root.querySelector('.modal');
+  setTimeout(() => input.focus(), 60);
+
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const candidate = await sha256Hex(input.value);
+    if (candidate === PASS_HASH) {
+      root.classList.add('fade-out');
+      setTimeout(() => root.remove(), 180);
+      onSuccess && onSuccess();
+    } else {
+      err.classList.remove('hidden');
+      box.classList.remove('shake');
+      void box.offsetWidth;     // restart animation
+      box.classList.add('shake');
+      input.select();
+    }
+  });
+  root.querySelector('.passcode-cancel').addEventListener('click', () => root.remove());
+  root.addEventListener('click', e => { if (e.target === root) root.remove(); });
 }
 
 // ---------------- Results ----------------
@@ -475,6 +546,141 @@ function screenResults() {
       btn.addEventListener('click', () => {
         stopAll();
         play(sfx[btn.dataset.sfx]);
+      });
+    });
+
+    // Refresh the per-question analytics panel after every state change.
+    renderAnalytics();
+  }
+
+  // ---- Analytics panel (new feature, additive — does not replace the
+  //      existing scoreboard above) -------------------------------------
+  async function renderAnalytics() {
+    const board = document.getElementById('results-board');
+    if (!board) return;
+
+    // Ensure a host element exists immediately after the results-board.
+    let panel = document.getElementById('analytics-panel');
+    if (!panel) {
+      panel = document.createElement('section');
+      panel.id = 'analytics-panel';
+      panel.className = 'analytics-section';
+      panel.innerHTML = `
+        <div class="analytics-head">
+          <div class="eyebrow">Per-question analytics</div>
+          <h3 class="analytics-title">Question Breakdown</h3>
+          <p class="analytics-sub">Correct vs. incorrect for every question, sliced by Stan and by fighter.</p>
+        </div>
+        <div class="qa-list"></div>
+        <div class="fighter-head">
+          <div class="eyebrow">Per-fighter detail</div>
+          <h3 class="analytics-title">Fighter Cards</h3>
+          <p class="analytics-sub">Each strip shows the 10 questions in order: ✓ correct · ✗ wrong · — no answer (timed out).</p>
+        </div>
+        <div class="fighter-grid"></div>
+        <div class="analytics-empty hidden">No fighter data yet for this arena.</div>`;
+      board.insertAdjacentElement('afterend', panel);
+    }
+
+    let plays = [];
+    try { plays = await store.listPlays(); } catch (_) { plays = []; }
+
+    const qaList    = panel.querySelector('.qa-list');
+    const figGrid   = panel.querySelector('.fighter-grid');
+    const empty     = panel.querySelector('.analytics-empty');
+    const figHead   = panel.querySelector('.fighter-head');
+
+    qaList.innerHTML = '';
+    figGrid.innerHTML = '';
+
+    if (!plays.length) {
+      empty.classList.remove('hidden');
+      figHead.classList.add('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    figHead.classList.remove('hidden');
+
+    // ---- Per-question aggregates -----------------------------------
+    QUESTIONS.forEach((q, qi) => {
+      let totalAnswered = 0, totalCorrect = 0;
+      const perStan = {};
+      STANS.forEach(s => perStan[s.id] = { correct: 0, total: 0 });
+
+      plays.forEach(p => {
+        const choice = Array.isArray(p.answers) ? p.answers[qi] : undefined;
+        if (choice === undefined || choice === null) return;
+        totalAnswered += 1;
+        if (perStan[p.stan]) perStan[p.stan].total += 1;
+        if (choice === q.correctIndex) {
+          totalCorrect += 1;
+          if (perStan[p.stan]) perStan[p.stan].correct += 1;
+        }
+      });
+
+      const pct = totalAnswered ? Math.round((totalCorrect / totalAnswered) * 100) : 0;
+      const card = document.createElement('div');
+      card.className = 'qa-card';
+      card.innerHTML = `
+        <div class="qa-row">
+          <span class="qa-num">Q${qi + 1}</span>
+          <span class="qa-text">${escapeHtml(q.q)}</span>
+          <span class="qa-rate">${totalCorrect}/${totalAnswered} · ${pct}%</span>
+        </div>
+        <div class="qa-bar"><span style="width:${pct}%"></span></div>
+        <div class="qa-stan-row">
+          ${STANS.map(s => {
+            const ps = perStan[s.id];
+            const sp = ps.total ? Math.round((ps.correct / ps.total) * 100) : 0;
+            return `
+              <div class="qa-stan-stat" style="--c1:${s.c1};--c2:${s.c2}">
+                <span class="qa-stan-dot"></span>
+                <span class="qa-stan-name">${s.name}</span>
+                <span class="qa-stan-val">${ps.correct}/${ps.total}${ps.total ? ` · ${sp}%` : ''}</span>
+              </div>`;
+          }).join('')}
+        </div>`;
+      qaList.appendChild(card);
+    });
+
+    // ---- Per-fighter cards (grouped by Stan, in scoreboard order) ----
+    const stanOrder = STANS
+      .map(s => ({ ...s, total: (store.getState().scores[s.id] || 0) }))
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    const playsByStan = {};
+    plays.forEach(p => { (playsByStan[p.stan] = playsByStan[p.stan] || []).push(p); });
+
+    stanOrder.forEach(stan => {
+      const list = playsByStan[stan.id] || [];
+      if (!list.length) return;
+      list.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+      list.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'fighter-card';
+        card.style.setProperty('--c1', stan.c1);
+        card.style.setProperty('--c2', stan.c2);
+        const cells = QUESTIONS.map((q, qi) => {
+          const choice = Array.isArray(p.answers) ? p.answers[qi] : undefined;
+          if (choice === undefined || choice === null) {
+            return `<span class="fighter-cell empty" title="Q${qi+1} · no data">·</span>`;
+          }
+          if (choice === -1) {
+            return `<span class="fighter-cell timeout" title="Q${qi+1} · timed out">—</span>`;
+          }
+          if (choice === q.correctIndex) {
+            return `<span class="fighter-cell correct" title="Q${qi+1} · correct">✓</span>`;
+          }
+          return `<span class="fighter-cell wrong" title="Q${qi+1} · wrong">✗</span>`;
+        }).join('');
+        card.innerHTML = `
+          <div class="fighter-head-row">
+            <span class="fighter-stan-dot"></span>
+            <span class="fighter-name">${escapeHtml(p.name)}</span>
+            <span class="fighter-stan-tag">Team ${stan.name}</span>
+            <span class="fighter-score">${p.score}/10</span>
+          </div>
+          <div class="fighter-strip">${cells}</div>`;
+        figGrid.appendChild(card);
       });
     });
   }
